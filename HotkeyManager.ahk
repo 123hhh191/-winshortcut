@@ -11,6 +11,9 @@
 ;  配置：  HotkeyManager.ini（首次运行自动生成）
 ; ============================================================
 
+; 鼠标坐标统一用屏幕坐标：MouseGetPos 默认返回客户区坐标，与 WinGetPos 混用会导致窗口抖动
+CoordMode("Mouse", "Screen")
+
 ; 若未以管理员运行则自动提权重启（普通权限无法在管理员窗口上使用热键/调整窗口）
 ; 可用 --no-elevate 参数跳过（调试用）
 if (!A_IsAdmin) {
@@ -298,6 +301,7 @@ RS := { active: false }
 
 ResizeWindowMode() {
     global RS
+    static tipShown := false
     hwnd := WinExist("A")
     if (!hwnd)
         return
@@ -332,6 +336,7 @@ ResizeWindowMode() {
     RS.ox := wx, RS.oy := wy, RS.ow := ww, RS.oh := wh
     RS.sx := mx, RS.sy := my
     RS.moved := false
+    RS.lx := "", RS.ly := "", RS.lw := "", RS.lh := ""
     RS.active := true
     ; 拦截左键用于确认，同时避免点中窗口边框时触发系统自带的拖拽缩放
     try {
@@ -342,7 +347,10 @@ ResizeWindowMode() {
         return
     }
     SetTimer(ResizeTick, 16)
-    TrayTip("移动鼠标调整窗口大小`n左键确认 · Esc 取消", "调整窗口大小", 2)
+    if (!tipShown) {
+        tipShown := true
+        TrayTip("移动鼠标调整窗口大小`n左键确认 · Esc 取消", "调整窗口大小", 2)
+    }
 }
 
 ResizeTick() {
@@ -378,8 +386,13 @@ ResizeTick() {
         else
             bottom := top + 160
     }
+    nw := right - left, nh := bottom - top
+    ; 尺寸没变就不重设，避免每帧重复重绘造成闪烁
+    if (RS.lx = left && RS.ly = top && RS.lw = nw && RS.lh = nh)
+        return
+    RS.lx := left, RS.ly := top, RS.lw := nw, RS.lh := nh
     DllCall("SetWindowPos", "Ptr", RS.hwnd, "Ptr", 0, "Int", left, "Int", top
-        , "Int", right - left, "Int", bottom - top, "UInt", 0x0004 | 0x0010)
+        , "Int", nw, "Int", nh, "UInt", 0x0004 | 0x0010)
 }
 
 ConfirmResize(*) {

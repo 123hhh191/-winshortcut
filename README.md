@@ -8,8 +8,8 @@
 
 ## 下载
 
-- 直接下载 `HotkeyManager.exe`（单文件，免安装）
-- 或从 Releases 页面下载最新版本
+- 仓库地址：https://github.com/123hhh191/-winshortcut
+- 直接下载：[HotkeyManager.exe](https://github.com/123hhh191/-winshortcut/raw/main/HotkeyManager.exe)（单文件，免安装）
 
 ## 使用方法
 

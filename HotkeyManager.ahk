@@ -96,7 +96,7 @@ MakeDefaults() {
 窗口|左半屏|send:#{Left}|||Win+←
 窗口|右半屏|send:#{Right}|||Win+→
 窗口|置顶切换|win:top|||切换活动窗口置顶
-窗口|调整窗口大小|win:resize|||进入调整大小模式：方向键选边/调整，Enter 确认，Esc 取消（同 Ubuntu Alt+F8）
+窗口|调整窗口大小|win:resize|||按下后窗口随鼠标改变大小，左键确认，Esc 取消
 窗口|水平最大化|||no|Windows 无单独水平最大化；已置灰
 窗口|垂直最大化|||no|Windows 无单独垂直最大化；已置灰
 窗口|置顶所有工作区|||no|Windows 虚拟桌面无简单快捷键；已置灰
@@ -149,7 +149,10 @@ LoadConfig() {
     for b in S.bindings {
         if (b.act = "win:size") {
             b.act := "win:resize"
-            b.note := "进入调整大小模式：方向键选边/调整，Enter 确认，Esc 取消（同 Ubuntu Alt+F8）"
+            b.note := "按下后窗口随鼠标改变大小，左键确认，Esc 取消"
+            migrated := true
+        } else if (b.act = "win:resize" && InStr(b.note, "方向键")) {
+            b.note := "按下后窗口随鼠标改变大小，左键确认，Esc 取消"
             migrated := true
         }
     }
@@ -287,19 +290,120 @@ BrightnessDelta(d) {
     }
 }
 
-; 进入 Windows 原生「调整大小」模式（等价 Ubuntu Alt+F8）
-; 进入后可：鼠标拖动边缘 / 方向键选择边再调整 / Enter 确认 / Esc 取消 / Shift 加大步长
+; ============================================================
+;  鼠标跟随式调整窗口大小
+;  按下快捷键 → 窗口随鼠标实时改变大小 → 单击左键确认 / Esc 取消
+; ============================================================
+RS := { active: false }
+
 ResizeWindowMode() {
+    global RS
     hwnd := WinExist("A")
     if (!hwnd)
         return
-    ; 最大化或最小化的窗口先还原，否则无法进入调整模式
+    ; 已处于调整模式时，再按一次等于取消
+    if (RS.active) {
+        EndResize(false)
+        return
+    }
+    ; 最大化/最小化的窗口先还原，否则无法改变大小
     if (WinGetMinMax("ahk_id " hwnd) != 0) {
         DllCall("ShowWindow", "Ptr", hwnd, "Int", 9)   ; SW_RESTORE
-        Sleep 120
+        Sleep 150
     }
-    ; WM_SYSCOMMAND = 0x0112, SC_SIZE = 0xF000
-    PostMessage(0x0112, 0xF000, 0, , "ahk_id " hwnd)
+    WinGetPos(&wx, &wy, &ww, &wh, "ahk_id " hwnd)
+    MouseGetPos(&mx, &my)
+    ; 取离鼠标最近的角作为拖动角，它的对角固定不动
+    cx := [wx, wx + ww, wx, wx + ww]
+    cy := [wy, wy, wy + wh, wy + wh]
+    ax := [wx + ww, wx, wx + ww, wx]
+    ay := [wy + wh, wy + wh, wy, wy]
+    best := 1, bestD := 999999999999
+    Loop 4 {
+        dx := mx - cx[A_Index], dy := my - cy[A_Index]
+        d := dx * dx + dy * dy
+        if (d < bestD) {
+            bestD := d
+            best := A_Index
+        }
+    }
+    RS.hwnd := hwnd
+    RS.ax := ax[best], RS.ay := ay[best]
+    RS.ox := wx, RS.oy := wy, RS.ow := ww, RS.oh := wh
+    RS.sx := mx, RS.sy := my
+    RS.moved := false
+    RS.active := true
+    ; 拦截左键用于确认，同时避免点中窗口边框时触发系统自带的拖拽缩放
+    try {
+        Hotkey("$*LButton", ConfirmResize, "On")
+        Hotkey("$*Escape", CancelResize, "On")
+    } catch {
+        EndResize(false)
+        return
+    }
+    SetTimer(ResizeTick, 16)
+    TrayTip("移动鼠标调整窗口大小`n左键确认 · Esc 取消", "调整窗口大小", 2)
+}
+
+ResizeTick() {
+    global RS
+    if (!RS.active) {
+        SetTimer(ResizeTick, 0)
+        return
+    }
+    if (!WinExist("ahk_id " RS.hwnd)) {
+        EndResize(false)
+        return
+    }
+    MouseGetPos(&mx, &my)
+    ; 鼠标还没明显移动时保持原样，避免误触把窗口缩到最小
+    if (!RS.moved) {
+        dx := mx - RS.sx, dy := my - RS.sy
+        if (dx * dx + dy * dy < 100)
+            return
+        RS.moved := true
+    }
+    left := Min(RS.ax, mx), top := Min(RS.ay, my)
+    right := Max(RS.ax, mx), bottom := Max(RS.ay, my)
+    ; 最小尺寸，防止缩成一条线
+    if (right - left < 240) {
+        if (mx < RS.ax)
+            left := right - 240
+        else
+            right := left + 240
+    }
+    if (bottom - top < 160) {
+        if (my < RS.ay)
+            top := bottom - 160
+        else
+            bottom := top + 160
+    }
+    DllCall("SetWindowPos", "Ptr", RS.hwnd, "Ptr", 0, "Int", left, "Int", top
+        , "Int", right - left, "Int", bottom - top, "UInt", 0x0004 | 0x0010)
+}
+
+ConfirmResize(*) {
+    EndResize(true)
+}
+
+CancelResize(*) {
+    EndResize(false)
+}
+
+EndResize(keep) {
+    global RS
+    if (!RS.active)
+        return
+    RS.active := false
+    SetTimer(ResizeTick, 0)
+    ; 无论如何都解除拦截，否则左键会一直失效
+    try {
+        Hotkey("$*LButton", "Off")
+        Hotkey("$*Escape", "Off")
+    }
+    if (!keep && WinExist("ahk_id " RS.hwnd))
+        DllCall("SetWindowPos", "Ptr", RS.hwnd, "Ptr", 0, "Int", RS.ox, "Int", RS.oy
+            , "Int", RS.ow, "Int", RS.oh, "UInt", 0x0004 | 0x0010)
 }
 
 ; ============================================================

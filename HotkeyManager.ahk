@@ -424,27 +424,70 @@ EndResize(keep) {
 ; ============================================================
 BuildGui() {
     global S
-    g := Gui("+Resize", S.title)
+    g := Gui("+Resize +MinSize620x420", S.title)
     g.SetFont("s9", "Microsoft YaHei UI")
-    g.Add("Text", "xm", "搜索：")
-    S.search := g.Add("Edit", "x+5 w300")
+
+    S.lblSearch := g.Add("Text", "x12 y15 w44 h20", "搜索：")
+    S.search := g.Add("Edit", "x56 y11 w300 h24")
     S.search.OnEvent("Change", (*) => RefreshList())
 
-    S.lv := g.Add("ListView", "xm y+10 w720 h400 +Grid -Multi", ["名称", "快捷键"])
+    S.lv := g.Add("ListView", "x12 y42 w720 h400 +Grid -Multi", ["名称", "快捷键"])
     S.lv.ModifyCol(1, 500)
     S.lv.ModifyCol(2, 190)
     S.lv.OnEvent("DoubleClick", OnRowDoubleClick)
     S.lv.OnEvent("Click", OnRowClick)
 
-    g.Add("Button", "xm w150", "+ 添加自定义快捷键").OnEvent("Click", (*) => ShowAddDialog())
-    g.Add("Button", "x+10 w90", "移除").OnEvent("Click", RemoveSelected)
-    g.Add("Button", "x+10 w90", "重载").OnEvent("Click", (*) => Reload())
-    g.Add("Button", "x+10 w100", "重置默认").OnEvent("Click", ResetDefaults)
+    S.btnAdd := g.Add("Button", "x12 y458 w150 h26", "+ 添加自定义快捷键")
+    S.btnAdd.OnEvent("Click", (*) => ShowAddDialog())
+    S.btnDel := g.Add("Button", "x172 y458 w90 h26", "移除")
+    S.btnDel.OnEvent("Click", RemoveSelected)
+    S.btnReload := g.Add("Button", "x272 y458 w90 h26", "重载")
+    S.btnReload.OnEvent("Click", (*) => Reload())
+    S.btnReset := g.Add("Button", "x372 y458 w100 h26", "重置默认")
+    S.btnReset.OnEvent("Click", ResetDefaults)
 
-    S.status := g.Add("Text", "xm y+8 w720 r2 c808080", S.tip)
+    S.status := g.Add("Text", "x12 y492 w720 h20 c808080", S.tip)
+
+    g.OnEvent("Size", OnGuiSize)
     g.OnEvent("Close", (*) => g.Hide())
     g.OnEvent("Escape", (*) => g.Hide())
     S.main := g
+}
+
+; 窗口尺寸变化（含最大化）时重新排布控件
+OnGuiSize(g, minMax, W, H) {
+    if (W < 200 || H < 200)   ; 最小化时宽高为 0
+        return
+    LayoutGui(W, H)
+}
+
+LayoutGui(W, H) {
+    global S
+    m := 12
+    ; 顶部搜索行
+    S.lblSearch.Move(m, 15, 44, 20)
+    S.search.Move(m + 44, 11, Min(320, W - 2 * m - 44), 24)
+    ; 底部两块：状态提示贴底，按钮在其上方
+    statusH := 20, btnH := 26
+    statusY := H - m - statusH
+    btnY := statusY - 8 - btnH
+    ; 列表填满中间区域
+    lvY := 42
+    lvH := btnY - 12 - lvY
+    if (lvH < 80)
+        lvH := 80
+    S.lv.Move(m, lvY, W - 2 * m, lvH)
+    ; 列宽随窗口伸缩：快捷键列固定，名称列吃掉剩余宽度
+    col2 := 190
+    S.lv.ModifyCol(2, col2)
+    S.lv.ModifyCol(1, Max(160, W - 2 * m - col2 - 24))
+    ; 按钮行
+    S.btnAdd.Move(m, btnY, 150, btnH)
+    S.btnDel.Move(m + 160, btnY, 90, btnH)
+    S.btnReload.Move(m + 260, btnY, 90, btnH)
+    S.btnReset.Move(m + 360, btnY, 100, btnH)
+    ; 底部灰字提示
+    S.status.Move(m, statusY, W - 2 * m, statusH)
 }
 
 RefreshList() {
@@ -665,3 +708,6 @@ BuildGui()
 BuildTray()
 RefreshList()
 S.main.Show()
+; 首次显示后按真实客户区做一次布局（Size 事件在部分情况下可能不触发）
+S.main.GetClientPos(, , &cw0, &ch0)
+LayoutGui(cw0, ch0)

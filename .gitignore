@@ -1,0 +1,13 @@
+# 用户配置（含个人键位，不发布）
+HotkeyManager.ini
+
+# 本地开发工具链（体积大，不发布）
+AutoHotkey_2.0.31/
+AutoHotkey_2.0.31.zip
+AutoHotkey_2.0.31_setup.exe
+Ahk2Exe/
+Ahk2Exe.zip
+
+# 临时文件
+_*
+*.log

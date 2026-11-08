@@ -252,9 +252,39 @@ RunAction(b, *) {
 
 BrightnessDelta(d) {
     ; 仅笔记本/一体机内置屏：走 Windows 自带 WMI，无需第三方工具
-    sign := d > 0 ? "+" d : "" d
-    ps := '$b=(Get-CimInstance -Namespace root/WMI -ClassName WmiMonitorBrightness).CurrentBrightness; if($null -ne $b){$n=[Math]::Max(0,[Math]::Min(100,$b' sign ')); (Get-CimInstance -Namespace root/WMI -ClassName WmiMonitorBrightnessMethods).WmiSetBrightness(1,$n)}'
-    Run('powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "' ps '"', , "Hide")
+    ; 两个必须条件：① 用 Get-WmiObject（Get-CimInstance 的 CimInstance 没有 WmiSetBrightness 方法）
+    ;              ② 需要管理员权限（普通权限调用返回「拒绝访问」）
+    static warnedNoPanel := false, warnedNoAdmin := false
+    if (!A_IsAdmin) {
+        if (!warnedNoAdmin) {
+            warnedNoAdmin := true
+            r := MsgBox("调整屏幕亮度需要管理员权限。`n`n当前以普通权限运行，是否以管理员身份重启？", "键盘快捷键", "YesNo Icon!")
+            if (r = "Yes")
+                RestartAsAdmin()
+        }
+        return
+    }
+    sign := d > 0 ? "+" . d : "" . d
+    ps := '$b=(Get-WmiObject -Namespace root/WMI -ClassName WmiMonitorBrightness -ErrorAction SilentlyContinue).CurrentBrightness;'
+    ps .= 'if($null -eq $b){exit 2};'
+    ps .= '$n=[byte][Math]::Max(0,[Math]::Min(100,$b' sign '));'
+    ps .= '$m=Get-WmiObject -Namespace root/WMI -ClassName WmiMonitorBrightnessMethods -ErrorAction SilentlyContinue;'
+    ps .= 'if($null -eq $m){exit 3};'
+    ps .= 'try{$m.WmiSetBrightness(1,$n)}catch{exit 4}'
+    code := -1
+    try
+        code := RunWait('powershell.exe -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -Command "' ps '"', , "Hide")
+    catch
+        code := -1
+    ; 2/3 = 本机没有可通过 WMI 调亮度的内置屏（台式机 / 纯外接显示器）
+    if (code = 2 || code = 3) {
+        if (!warnedNoPanel) {
+            warnedNoPanel := true
+            TrayTip("未检测到可通过 WMI 调节亮度的内置屏。`n亮度快捷键仅适用于笔记本/一体机内置屏。", "键盘快捷键", 5)
+        }
+    } else if (code = 4 || code = 1) {
+        TrayTip("调整亮度失败：权限不足或显示器不支持。", "键盘快捷键", 5)
+    }
 }
 
 ; 进入 Windows 原生「调整大小」模式（等价 Ubuntu Alt+F8）
